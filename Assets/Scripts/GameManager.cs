@@ -26,16 +26,23 @@ public class GameManager : MonoBehaviourPunCallbacks
     public Text AnnouncementTxt;
     public Text TimeTxt;
 
+    [Header("DescribeUI")]
+    public InputField DescriptionInput;
+
     #region 게임 상태 변수
     private List<GamePlayer> gamePlayers;
     private string[] colors = { "red", "yellow", "green", "blue", "cyan", "purple", "magenta", "white" };
 
-    private string myName;
+    private int myPlayerID;
+
+    private int startTurn;
+    private int curTurn;
+
     private string liarName;
     private string answerSubject;
     private string answerWord;
 
-    enum gameState { WAIT, SET_PLAYER , SELECT_LIAR, DESCRIBE, VOTE, ARGUE, REVOTE, WRAP_GAME }
+    enum gameState { WAIT, SET_PLAYER , SET_GAME, DESCRIBE, VOTE, ARGUE, REVOTE, WRAP_GAME }
     gameState curState = gameState.WAIT;
     private bool isStateOver = false;
     #endregion
@@ -45,9 +52,18 @@ public class GameManager : MonoBehaviourPunCallbacks
     {
         if (Input.GetKeyDown(KeyCode.Return) && ScreenManager.SM.GetCurrentScreen() == 3)
         {
-            if (ChatInput.text != "")
-                Send();
-            ChatInput.Select();
+            if (curTurn == myPlayerID)
+            {
+                if (DescriptionInput.text != "")
+                    SendDescription();
+                DescriptionInput.Select();
+            }
+            else
+            {
+                if (ChatInput.text != "")
+                    Send();
+                ChatInput.Select();
+            }
         }
     }
 
@@ -59,9 +75,20 @@ public class GameManager : MonoBehaviourPunCallbacks
             case gameState.WAIT:
                 curState = gameState.WAIT; break;
             case gameState.SET_PLAYER:
-                curState = gameState.SELECT_LIAR; break;
-            case gameState.SELECT_LIAR:
+                curState = gameState.SET_GAME; break;
+            case gameState.SET_GAME:
                 curState = gameState.DESCRIBE; break;
+            case gameState.DESCRIBE:
+                // 다시 첫턴으로 돌아오면 다음 단계로
+                if(curTurn == startTurn)
+                {
+                    curState = gameState.VOTE; break;
+                }
+                // 아니면 다시 설명단계
+                else
+                {
+                    curState = gameState.DESCRIBE; break;
+                }
         }
         StartCoroutine(GameStateRoutine());
     }
@@ -72,25 +99,54 @@ public class GameManager : MonoBehaviourPunCallbacks
 
     private void SetPlayer()
     {
-        Debug.Log("SetPlayer");
+        Announce("플레이어들을 위한 의자와 음료를 준비중입니다...");
         PV.RPC("SyncPlayers", RpcTarget.All);
     }
 
-    private void SelectLiar()
+    private void SetGame()
     {
-        Debug.Log("SelectLiar");
+        Announce("라이어와 제시어를 정하는 중입니다...");
+        // 마스터가 선턴 정함
+        startTurn = Random.Range(0, gamePlayers.Count);
+        curTurn = startTurn;
+
         // 마스터가 게임 정답 정함
         int liarID = Random.Range(0, gamePlayers.Count);
         liarName = gamePlayers[liarID].GetName();
         answerSubject = DB.GetRandomSubject();
         answerWord = DB.GetRandomWord(answerSubject);
+
         // 다른 클라들한테 전달
-        PV.RPC("SyncGameAnswer", RpcTarget.All, liarName, answerSubject, answerWord);
+        PV.RPC("SyncGame", RpcTarget.All, liarName, answerSubject, answerWord, startTurn);
     }
 
     private void Describe()
     {
-        Debug.Log("Describe");
+        Announce(gamePlayers[curTurn].GetName() + " 님은 제시어를 설명해주세요.");
+        PV.RPC("DescribeStart", RpcTarget.All, curTurn);
+    }
+
+    private void Vote()
+    {
+        Announce("라이어라고 생각되는 플레이어에게 투표해주세요.");
+    }
+
+
+
+
+
+
+
+
+    private void ExecuteDefault()
+    {
+        switch (curState)
+        {
+            case gameState.DESCRIBE:
+                PV.RPC("DescribeDefault", RpcTarget.All);
+                break;
+        }
+
     }
     #endregion
 
@@ -104,22 +160,31 @@ public class GameManager : MonoBehaviourPunCallbacks
     {
         int turnTime = 0;
         isStateOver = false;
+
         switch (curState)
         {
             case gameState.WAIT:
                 Wait(); break;
             case gameState.SET_PLAYER:
                 turnTime = 3; SetPlayer(); break;
-            case gameState.SELECT_LIAR:
-                turnTime = 5; SelectLiar(); break;
+            case gameState.SET_GAME:
+                turnTime = 5; SetGame(); break;
             case gameState.DESCRIBE:
                 turnTime = 30; Describe(); break;
+            case gameState.VOTE:
+                turnTime = 30; Vote(); break;
         }
 
         while (true)
         {
-            if (isStateOver || turnTime < 0)
+            if (isStateOver)
             {
+                ChangeState();
+                break;
+            }
+            else if(turnTime <= 0)
+            {
+                ExecuteDefault();
                 ChangeState();
                 break;
             }
@@ -130,7 +195,6 @@ public class GameManager : MonoBehaviourPunCallbacks
 
     }
 
-
     [PunRPC] private void SyncTimerUI(int time)
     {
         TimeTxt.text = time.ToString();
@@ -138,11 +202,12 @@ public class GameManager : MonoBehaviourPunCallbacks
     [PunRPC] private void SyncPlayers()
     {
         // 참여한 플레이어 정보 전역변수 갱신
-        myName = PhotonNetwork.LocalPlayer.NickName;
         gamePlayers = new List<GamePlayer>();
         for(int i=0; i<PhotonNetwork.PlayerList.Length; i++)
         {
             GamePlayer newGP = new GamePlayer(PhotonNetwork.PlayerList[i].NickName, colors[i]);
+            if (newGP.GetName().Equals(PhotonNetwork.NickName))
+                myPlayerID = i;
             gamePlayers.Add(newGP);
         }
         // UI 표시
@@ -152,23 +217,72 @@ public class GameManager : MonoBehaviourPunCallbacks
             PlayerPanel[i].transform.GetChild(1).GetComponent<Text>().text = gamePlayers[i].GetScore() + "/5";
         }
     }
-    [PunRPC] private void SyncGameAnswer(string liarName_, string answerSubject_, string answerWord_)
+    [PunRPC] private void SyncGame(string liarName_, string answerSubject_, string answerWord_, int startTurn_)
     {
         // 게임 핵심 정보 전역변수 갱신
+        startTurn = startTurn_;
+        curTurn = startTurn_;
         liarName = liarName_;
         answerSubject = answerSubject_;
         answerWord = answerWord_;
         // UI 표시
         SubjectTxt.text = "주제: " + answerSubject;
-        WordTxt.text = (myName.Equals(liarName)) ? "당신은 Liar입니다." : "제시어: " + answerWord;
+        WordTxt.text = (gamePlayers[myPlayerID].GetName().Equals(liarName)) ? "당신은 Liar입니다." : "제시어: " + answerWord;
     }
+
+    [PunRPC] private void DescribeStart(int curTurn_)
+    {
+        curTurn = curTurn_;
+        // 내가 설명할 차례면 설명패널 활성화
+        if(curTurn == myPlayerID) 
+        {
+            DescriptionInput.gameObject.SetActive(true);
+        }
+    }
+    [PunRPC] private void DescribeDefault()
+    {
+        // 내 턴이었는데 시간이 다 지났음
+        if(curTurn == myPlayerID)
+        {
+            // 쓰던거 강제로 보내고 종료
+            SendDescription();
+        }
+    }
+    [PunRPC] private void DescribeDone()
+    {
+        // 설명패널 비활성화
+        DescriptionInput.gameObject.SetActive(false);
+        // 턴 넘기기
+        curTurn = (curTurn + 1) % gamePlayers.Count;
+        isStateOver = true;
+    }
+    public void SendDescription()
+    {
+        string msg = "<color="+ gamePlayers[myPlayerID].GetColor()+">" + gamePlayers[myPlayerID].GetName() +"</color>: " + "<color=yellow>"+ DescriptionInput.text + "</color>";
+        PV.RPC("ChatRPC", RpcTarget.All, msg);
+        DescriptionInput.text = "";
+        // 설명 끝났어
+        PV.RPC("DescribeDone", RpcTarget.All);
+    }
+    #region 공지
+    private void Announce(string msg)
+    {
+        PV.RPC("AnnounceRPC", RpcTarget.All, msg);
+    }
+    [PunRPC] private void AnnounceRPC(string msg)
+    {
+        AnnouncementTxt.text = msg;
+    }
+    #endregion
+
     #region 채팅
     public void Send()
     {
-        string msg = PhotonNetwork.NickName + " : " + ChatInput.text;
+        string msg = "<color="+ gamePlayers[myPlayerID].GetColor()+">" + gamePlayers[myPlayerID].GetName() +"</color>: " + ChatInput.text;
         PV.RPC("ChatRPC", RpcTarget.All, msg);
         ChatInput.text = "";
     }
+    
     [PunRPC]
     void ChatRPC(string msg)
     {
