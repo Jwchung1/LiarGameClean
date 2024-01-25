@@ -15,11 +15,12 @@ public class Launcher : MonoBehaviourPunCallbacks
     public GameObject ConnectScreen;
     public GameObject LobbyScreen;
 
+    private Dictionary<string, int> test = new Dictionary<string, int>();
+
     private void Awake()
     {
         Screen.SetResolution(1280, 720, false);
         ScreenManager.SM.SetInitialScreen();
-
     }
     private void Update()
     {
@@ -31,6 +32,7 @@ public class Launcher : MonoBehaviourPunCallbacks
             if (IdInput.text != "")
                 Connect();
         }
+
     }
     public void Connect() => PhotonNetwork.ConnectUsingSettings();
 
@@ -50,7 +52,6 @@ public class Launcher : MonoBehaviourPunCallbacks
 
     private void InitPlayer()
     {
-        Debug.Log("이닛플레이어");
         // 첫 접속시 접속한 플레이어 정보를 초기화
         if(ScreenManager.SM.GetCurrentScreen() == 0)
             PhotonNetwork.LocalPlayer.NickName = IdInput.text;

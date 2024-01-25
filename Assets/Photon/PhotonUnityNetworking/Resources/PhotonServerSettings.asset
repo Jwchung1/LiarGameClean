@@ -55,6 +55,12 @@ MonoBehaviour:
   - TimeOver
   - AnnounceRPC
   - DescribeDefault
+  - ActivateVoteBtn
+  - GetVotePaper
+  - DeactivateVoteBtn
+  - ActivateKillSaveBtn
+  - DeactivateKillSaveBtn
+  - GetKillSaveVotePaper
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1
