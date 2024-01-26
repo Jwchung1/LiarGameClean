@@ -35,6 +35,7 @@ public class RoomManager : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         ClearChat();
+        ScreenManager.SM.CloseGameScreen();
         ScreenManager.SM.CloseRoomScreen();
         ScreenManager.SM.OpenLobbyScreen();
     }

@@ -27,6 +27,7 @@ public class LobbyManager : MonoBehaviourPunCallbacks
             if (RoomNameInput.text != "")
                 CreateRoom();
         }
+        
     }
 
     public void Disconnect() => PhotonNetwork.Disconnect();
@@ -69,6 +70,10 @@ public class LobbyManager : MonoBehaviourPunCallbacks
                 {
                     myRoomList[myRoomList.IndexOf(roomList[i])] = roomList[i];
                 }
+            }
+            else if (roomList[i].RemovedFromList)
+            {
+                myRoomList.Remove(roomList[i]);
             }
         }
         // UI 업데이트

@@ -25,7 +25,10 @@ public class GamePlayer
     {
         this.score_ = score;
     }
-
+    public void AddScore(int score)
+    {
+        this.score_ += score;
+    }
     public string GetName()
     {
         return this.name_;

@@ -34,6 +34,14 @@ public class GameManager : MonoBehaviourPunCallbacks
     [Header("KillSaveBtn")]
     public Button KillBtn;
     public Button SaveBtn;
+
+    [Header("WrapGame")]
+    public InputField GuessInput;
+    public Button LeaveBtn;
+    #endregion
+
+    #region 게임 설정 변수
+    int TARGET_SCORE = 7;
     #endregion
 
     #region 게임 상태 변수
@@ -44,6 +52,7 @@ public class GameManager : MonoBehaviourPunCallbacks
 
     private int startTurn;
     private int curTurn;
+    private bool isDescribing;
 
     private string liarName;
     private string answerSubject;
@@ -56,26 +65,78 @@ public class GameManager : MonoBehaviourPunCallbacks
     private int[] KillSaveVoteBox = new int[2];
     private bool isKill;
 
-    enum gameState { WAIT, SET_PLAYER , SET_GAME, DESCRIBE, VOTE, ARGUE, REVOTE, WRAP_GAME }
+    private bool isGuessing;
+
+    string winners = "";
+
+    enum gameState { WAIT, SET_PLAYER , SET_GAME, DESCRIBE, VOTE, ARGUE, REVOTE,VOTE_COUNT, GUESS, WRAP_GAME, GAME_OVER }
     gameState curState = gameState.WAIT;
     private bool isStateOver = false;
+
+    enum WinStatus { RightLiarWrongGuess, RightLiarRightGuess, WrongLiar};
+    WinStatus winStatus;
     #endregion
 
+    #region 게임 입퇴장
     public void MasterStartGame() // Master만 누를수있는 버튼 콜백 함수라 어차피 마스터만 사용함 => 마스터에서만 코루틴 돌아감 클라들은 단계별로 UI만 갱신됨
     {
         curState = gameState.SET_PLAYER;
         StartCoroutine(GameStateRoutine());
     }
+    private bool CheckGameOver()
+    {
+        
+        bool isGameOver = false;
+        foreach(GamePlayer p in gamePlayers)
+        {
+            if (p.GetScore() >= TARGET_SCORE)
+            {
+                winners += p.GetName() + ", ";
+                isGameOver = true;
+            }
+        }
+        return isGameOver;
+    }
+    private void GameOver()
+    {
+        Announce("GAME OVER\n" + winners + " 님이 우승하였습니다!");
+        PV.RPC("ClearGameRoom", RpcTarget.All);
+        PV.RPC("ActivateLeaveBtn", RpcTarget.All);
+    }
+    [PunRPC] private void ClearGameRoom()
+    {
+        StopAllCoroutines();
+        SubjectTxt.text = "";
+        WordTxt.text = "";
+        TimeTxt.text = "";
+        AnnouncementTxt.text = "";
+    }
+    [PunRPC] private void ActivateLeaveBtn()
+    {
+        LeaveBtn.gameObject.SetActive(true);
+    }
+    public void OnClickLeaveBtn()
+    {
+        LeaveBtn.gameObject.SetActive(false);
+        
+    }
+    #endregion
 
     private void Update()
     {
         if (Input.GetKeyDown(KeyCode.Return) && ScreenManager.SM.GetCurrentScreen() == 3)
         {
-            if (curTurn == myPlayerID)
+            if (isDescribing)
             {
                 if (DescriptionInput.text != "")
                     SendDescription();
                 DescriptionInput.Select();
+            }
+            else if(isGuessing)
+            {
+                if (GuessInput.text != "")
+                    SendGuess();
+                GuessInput.Select();
             }
             else
             {
@@ -110,13 +171,39 @@ public class GameManager : MonoBehaviourPunCallbacks
                     curState = gameState.DESCRIBE; break;
                 }
             case gameState.VOTE:
-                break;
+                curState = gameState.ARGUE; break;
             case gameState.ARGUE:
-                break;
+                if (isKill)
+                {
+                    curState = gameState.VOTE_COUNT; break;
+                }
+                else
+                {
+                    curState = gameState.REVOTE; break;
+                }
             case gameState.REVOTE:
-                break;
+                curState = gameState.VOTE_COUNT; break;
+            case gameState.VOTE_COUNT:
+                if(votedLiar.Equals(liarName))
+                {
+                    curState = gameState.GUESS; break;
+                }
+                else
+                {
+                    curState = gameState.WRAP_GAME; break;
+                }
+            case gameState.GUESS:
+                curState = gameState.WRAP_GAME; break;
             case gameState.WRAP_GAME:
-                break;
+                if(CheckGameOver())
+                {
+                    curState = gameState.GAME_OVER; break;
+                }
+                else
+                {
+                    curState = gameState.SET_GAME; break;
+                }
+                
         }
         StartCoroutine(GameStateRoutine());
     }
@@ -140,9 +227,13 @@ public class GameManager : MonoBehaviourPunCallbacks
             case gameState.REVOTE:
                 VoteDone();
                 break;
-            case gameState.WRAP_GAME:
-                WrapGameDone();
+            case gameState.VOTE_COUNT:
+                isStateOver = true; break;
+            case gameState.GUESS:
+                GuessDone("");
                 break;
+            case gameState.WRAP_GAME:
+                isStateOver = true; break;
         }
 
     }
@@ -160,15 +251,21 @@ public class GameManager : MonoBehaviourPunCallbacks
             case gameState.SET_GAME:
                 turnTime = 5; SetGame(); break;
             case gameState.DESCRIBE:
-                turnTime = 5; Describe(); break;
+                turnTime = 30; Describe(); break;
             case gameState.VOTE:
                 turnTime = 30; Vote(); break;
             case gameState.ARGUE:
                 turnTime = 30; Argue(); break;
             case gameState.REVOTE:
                 turnTime = 30; Revote(); break;
+            case gameState.VOTE_COUNT:
+                turnTime = 5; VoteCount(); break;
+            case gameState.GUESS:
+                turnTime = 20; Guess(); break;
             case gameState.WRAP_GAME:
-                turnTime = 30; WrapGame(); break;
+                turnTime = 10; WrapGame(); break;
+            case gameState.GAME_OVER:
+                GameOver(); break;
         }
 
         while (true)
@@ -199,7 +296,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     #region Wait
     private void Wait()
     {
-        Debug.Log("Wait");
+        return;
     }
     #endregion
 
@@ -225,7 +322,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         for (int i = 0; i < gamePlayers.Count; i++)
         {
             PlayerPanel[i].transform.GetChild(0).GetComponent<Text>().text = "<color=" + gamePlayers[i].GetColor() + ">" + gamePlayers[i].GetName() + "</color>";
-            PlayerPanel[i].transform.GetChild(1).GetComponent<Text>().text = gamePlayers[i].GetScore() + "/5";
+            PlayerPanel[i].transform.GetChild(1).GetComponent<Text>().text = gamePlayers[i].GetScore() + "/"+TARGET_SCORE;
         }
     }
     #endregion
@@ -243,6 +340,9 @@ public class GameManager : MonoBehaviourPunCallbacks
         liarName = gamePlayers[liarID].GetName();
         answerSubject = DB.GetRandomSubject();
         answerWord = DB.GetRandomWord(answerSubject);
+
+        // 승리 정보 초기화
+        winStatus = WinStatus.WrongLiar;
 
         // 다른 클라들한테 전달
         PV.RPC("SyncGame", RpcTarget.All, liarName, answerSubject, answerWord, startTurn);
@@ -275,8 +375,10 @@ public class GameManager : MonoBehaviourPunCallbacks
         // 누구 턴인지 UI에 표시
         PlayerPanel[curTurn_].transform.GetChild(2).GetComponent<Text>().text = "O";
         // 내가 설명할 차례면 설명패널 활성화
+        isDescribing = false;
         if (curTurn_ == myPlayerID)
         {
+            isDescribing = true;
             DescriptionInput.gameObject.SetActive(true);
         }
     }
@@ -294,6 +396,7 @@ public class GameManager : MonoBehaviourPunCallbacks
         DescriptionInput.gameObject.SetActive(false);
         // 턴 넘기기
         curTurn = (curTurn + 1) % gamePlayers.Count;
+        isDescribing = false;
         isStateOver = true;
     }
     public void SendDescription()
@@ -348,6 +451,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     }
     private void InitVoteBox()
     {
+        VoteBox.Clear();
         for(int i = 0; i < gamePlayers.Count; i++)
         {
             VoteBox.Add(gamePlayers[i].GetName(), 0);
@@ -387,7 +491,7 @@ public class GameManager : MonoBehaviourPunCallbacks
     private void Argue()
     {
         InitKillSaveVoteBox();
-        Announce(votedLiar+" 님이"+ VoteBox[votedLiar] +"표로 라이어로 지목되었습니다. 최후변론을 해주세요.");
+        Announce(votedLiar+" 님이 "+ VoteBox[votedLiar] +"표로 라이어로 지목되었습니다. 최후변론을 해주세요.");
         PV.RPC("ActivateKillSaveBtn", RpcTarget.All);
 
         StartCoroutine(CheckKillSaveVoteComplete());
@@ -443,19 +547,123 @@ public class GameManager : MonoBehaviourPunCallbacks
         votedNum++;
     }
     #endregion
+
+    #region Revote
     private void Revote()
     {
+        InitVoteBox();
         Announce("라이어라고 생각되는 플레이어에게 다시 투표해주세요.");
-    }
+        PV.RPC("ActivateVoteBtn", RpcTarget.All);
 
+        StartCoroutine(CheckVoteComplete());
+    }
+    #endregion
+
+    #region VoteCount
+    private void VoteCount()
+    {
+        Announce(votedLiar + " 님이 " + VoteBox[votedLiar] + "표로 라이어로 최종 지목되었습니다.");
+    }
+    #endregion
+
+    #region Guess
+    private void Guess()
+    {
+        Announce(votedLiar + " 님은 라이어가 맞았습니다. 제시어를 맞춰보세요.\n힌트: "+GenerateHint());
+        PV.RPC("ActivateGuess", RpcTarget.All);
+    }
+    private string GenerateHint()
+    {
+        string hint = "";
+        for(int i = 0; i < answerWord.Length - 1; i++)
+        {
+            hint += "_.";
+        }
+        hint += "_";
+        return hint;
+    }
+    [PunRPC]
+    private void ActivateGuess()
+    {
+        if (gamePlayers[myPlayerID].GetName().Equals(liarName))
+        {
+            isGuessing = true;
+            GuessInput.gameObject.SetActive(true);
+        }
+    }
+    private void SendGuess()
+    {
+        string msg = "<color=" + gamePlayers[myPlayerID].GetColor() + ">" + gamePlayers[myPlayerID].GetName() + "</color>: " + "<color=orange>" + GuessInput.text + "</color>";
+        PV.RPC("ChatRPC", RpcTarget.All, msg);
+        PV.RPC("GuessDone", RpcTarget.All, GuessInput.text);
+        GuessInput.text = "";
+    }
+    [PunRPC] private void GuessDone(string guess)
+    {
+        GuessInput.gameObject.SetActive(false);
+        isGuessing = false;
+        
+        if(guess.Equals(answerWord))
+        {
+            winStatus = WinStatus.RightLiarRightGuess;
+        }
+        else
+        {
+            winStatus = WinStatus.RightLiarWrongGuess;
+        }
+        isStateOver = true;
+    }
+    #endregion
+
+    #region WrapGame
     private void WrapGame()
     {
-        Announce("결과발표.");
+        bool isLiarWin = false;
+        switch (winStatus)
+        {
+            case WinStatus.WrongLiar:
+                Announce(votedLiar + " 님은 라이어가 아니었습니다.\n" + "진짜 라이어는 " + liarName + " 님이었습니다.\n라이어 승리!");
+                isLiarWin = true;
+                break;
+            case WinStatus.RightLiarWrongGuess:
+                Announce(votedLiar + " 님이 제시어를 맞추지 못했습니다.\n시민 승리!");
+                isLiarWin = false;
+                break;
+            case WinStatus.RightLiarRightGuess:
+                Announce(votedLiar + " 님이 제시어를 맞췄습니다.\n라이어 승리!");
+                isLiarWin = true;
+                break;
+        }
+        PV.RPC("GiveScore", RpcTarget.All, isLiarWin);
     }
-    private void WrapGameDone()
+    [PunRPC] private void GiveScore(bool isLiarWin)
     {
-
+        // 라이어 승
+        if (isLiarWin)
+        {
+            foreach(GamePlayer p in gamePlayers)
+            {
+                if (p.GetName().Equals(liarName))
+                    p.AddScore(2);
+            }
+        }
+        // 시민 승
+        else
+        {
+            foreach (GamePlayer p in gamePlayers)
+            {
+                if (!p.GetName().Equals(liarName))
+                    p.AddScore(1);
+            }
+        }
+        // UI 갱신
+        for (int i = 0; i < gamePlayers.Count; i++)
+        {
+            PlayerPanel[i].transform.GetChild(1).GetComponent<Text>().text = gamePlayers[i].GetScore() + "/"+TARGET_SCORE;
+        }
     }
+    #endregion
+
     #endregion
 
 

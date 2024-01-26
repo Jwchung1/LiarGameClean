@@ -61,6 +61,12 @@ MonoBehaviour:
   - ActivateKillSaveBtn
   - DeactivateKillSaveBtn
   - GetKillSaveVotePaper
+  - ActivateGuess
+  - GuessDone
+  - RenewScoreUI
+  - GiveScore
+  - ActivateLeaveBtn
+  - ClearGameRoom
   DisableAutoOpenWizard: 1
   ShowSettings: 0
   DevRegionSetOnce: 1
