@@ -26,7 +26,7 @@ public class Launcher : MonoBehaviourPunCallbacks
     {
         ConnectionStatus.text = PhotonNetwork.NetworkClientState.ToString();
 
-        if(Input.GetKeyDown(KeyCode.Return))
+        if(Input.GetKeyDown(KeyCode.Return) && ScreenManager.SM.GetCurrentScreen() == 0)
         {
             IdInput.Select();
             if (IdInput.text != "")
@@ -56,5 +56,10 @@ public class Launcher : MonoBehaviourPunCallbacks
         if(ScreenManager.SM.GetCurrentScreen() == 0)
             PhotonNetwork.LocalPlayer.NickName = IdInput.text;
 
+    }
+
+    public void GameExit()
+    {
+        Application.Quit();
     }
 }
